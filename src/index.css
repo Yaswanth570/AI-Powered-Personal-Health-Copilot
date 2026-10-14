@@ -1,0 +1,50 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Source Serif 4", ui-serif, Georgia, "Times New Roman", serif;
+
+  --color-background: #f6f5f1;
+  --color-foreground: #1c2a28;
+  --color-card: #ffffff;
+  --color-sidebar: #fbfaf7;
+  --color-muted: #eef3f1;
+  --color-muted-foreground: #5b6b68;
+  --color-border: #d8e2de;
+  --color-primary: #0f6b63;
+  --color-primary-hover: #0c5a54;
+  --color-primary-foreground: #f4fffc;
+  --color-accent: #d8eee9;
+  --color-ring: #0f6b63;
+  --color-warning: #7a5c1e;
+  --color-warning-bg: #f4ecda;
+  --color-warning-border: #e4d4ae;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply m-0 min-h-svh bg-background font-sans text-base text-foreground antialiased;
+  }
+
+  #root {
+    @apply min-h-svh;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+  }
+
+  dialog {
+    margin: auto;
+  }
+}
