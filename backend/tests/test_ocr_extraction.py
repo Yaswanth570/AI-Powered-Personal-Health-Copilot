@@ -72,9 +72,26 @@ def _make_text_pdf(text: str = "Selectable PDF text layer") -> bytes:
     return buffer.getvalue()
 
 
+from typing import Generator
+
+from app.api.auth_routes import get_current_user
+from app.db.models import User
+
+_TEST_USER = User(
+    id="test-user-ocr",
+    email="ocr-tester@example.com",
+    hashed_password="pw",
+    full_name="OCR Tester",
+    is_active=True,
+)
+
+
 @pytest.fixture()
-def client() -> TestClient:
-    return TestClient(app)
+def client() -> Generator[TestClient, None, None]:
+    app.dependency_overrides[get_current_user] = lambda: _TEST_USER
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_ocr_on_image_returns_text(client: TestClient) -> None:

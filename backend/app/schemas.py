@@ -622,3 +622,53 @@ class HealthCopilotAiReply(BaseModel):
         description="The actual model used to generate this response.",
     )
 
+
+# ============================================================================
+# User Authentication Schemas (SaaS)
+# ============================================================================
+
+
+class UserRegisterRequest(BaseModel):
+    """Payload to register a new user account."""
+
+    email: str = Field(
+        ...,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+        description="User's email address",
+    )
+    password: str = Field(..., min_length=8, max_length=128, description="Password (at least 8 chars)")
+    full_name: str = Field(..., min_length=2, max_length=255, description="User's full name")
+
+
+class UserLoginRequest(BaseModel):
+    """Payload to log into an existing user account."""
+
+    email: str = Field(
+        ...,
+        pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$",
+        description="Registered email address",
+    )
+    password: str = Field(..., min_length=1, max_length=128, description="Account password")
+
+
+class UserResponse(BaseModel):
+    """Public user profile response."""
+
+    id: str
+    email: str
+    full_name: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TokenResponse(BaseModel):
+    """JWT bearer token and user summary."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+

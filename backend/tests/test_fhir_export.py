@@ -26,6 +26,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.auth_routes import get_current_user
 from app.db.base import Base
 from app.db.models import (
     DiagnosisRecord,
@@ -33,6 +34,7 @@ from app.db.models import (
     MedicalDocument,
     MedicationRecord,
     Patient,
+    User,
 )
 from app.db.session import get_db
 from app.main import app
@@ -46,6 +48,8 @@ test_engine = create_engine(
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
+_TEST_USER_ID = "test-user-fhir-id"
+
 
 @pytest.fixture(autouse=True)
 def setup_test_db() -> Generator[None, None, None]:
@@ -55,7 +59,31 @@ def setup_test_db() -> Generator[None, None, None]:
 
 
 @pytest.fixture
-def client() -> Generator[TestClient, None, None]:
+def db_session() -> Generator[Session, None, None]:
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+@pytest.fixture
+def test_user(db_session: Session) -> User:
+    user = User(
+        id=_TEST_USER_ID,
+        email="fhir@test.local",
+        hashed_password="pw",
+        full_name="FHIR Tester",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def client(test_user: User) -> Generator[TestClient, None, None]:
     def _override_get_db() -> Generator[Session, None, None]:
         session = TestingSessionLocal()
         try:
@@ -64,6 +92,7 @@ def client() -> Generator[TestClient, None, None]:
             session.close()
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_current_user] = lambda: test_user
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

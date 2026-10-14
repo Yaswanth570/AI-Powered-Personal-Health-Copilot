@@ -14,6 +14,7 @@ import type {
   ChatConversationSummary,
   ChatSendMessageResponse,
 } from "../types";
+import { getAuthHeaders, notifyUnauthorized } from "./authApi";
 import { getApiBaseUrl } from "./pdfApi";
 
 export class ChatApiError extends Error {
@@ -29,6 +30,10 @@ export class ChatApiError extends Error {
 }
 
 async function handleResponse<T>(res: Response, defaultMessage: string): Promise<T> {
+  if (res.status === 401) {
+    notifyUnauthorized();
+  }
+
   if (res.ok) {
     return (await res.json()) as T;
   }
@@ -56,7 +61,10 @@ export async function fetchConversations(
   patientId: string,
 ): Promise<ChatConversationSummary[]> {
   const url = `${getApiBaseUrl()}/api/patients/${encodeURIComponent(patientId)}/conversations`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
   return handleResponse<ChatConversationSummary[]>(res, "Failed to load conversations");
 }
 
@@ -68,7 +76,7 @@ export async function createConversation(
   const url = `${getApiBaseUrl()}/api/patients/${encodeURIComponent(patientId)}/conversations`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ title }),
   });
   return handleResponse<ChatConversationDetail>(res, "Failed to create conversation");
@@ -80,7 +88,10 @@ export async function fetchConversation(
   conversationId: string,
 ): Promise<ChatConversationDetail> {
   const url = `${getApiBaseUrl()}/api/patients/${encodeURIComponent(patientId)}/conversations/${encodeURIComponent(conversationId)}`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
   return handleResponse<ChatConversationDetail>(res, "Failed to load conversation history");
 }
 
@@ -90,7 +101,10 @@ export async function deleteConversation(
   conversationId: string,
 ): Promise<void> {
   const url = `${getApiBaseUrl()}/api/patients/${encodeURIComponent(patientId)}/conversations/${encodeURIComponent(conversationId)}`;
-  const res = await fetch(url, { method: "DELETE" });
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
   await handleResponse<{ deleted: boolean }>(res, "Failed to delete conversation");
 }
 
@@ -113,7 +127,7 @@ export async function sendChatMessage(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
 

@@ -42,9 +42,26 @@ def _make_image_only_pdf() -> bytes:
     return buffer.getvalue()
 
 
+from typing import Generator
+
+from app.api.auth_routes import get_current_user
+from app.db.models import User
+
+_TEST_USER = User(
+    id="test-user-pdf",
+    email="pdf-tester@example.com",
+    hashed_password="pw",
+    full_name="PDF Tester",
+    is_active=True,
+)
+
+
 @pytest.fixture()
-def client() -> TestClient:
-    return TestClient(app)
+def client() -> Generator[TestClient, None, None]:
+    app.dependency_overrides[get_current_user] = lambda: _TEST_USER
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.pop(get_current_user, None)
 
 
 def test_valid_text_pdf_extracts_text(client: TestClient) -> None:

@@ -17,6 +17,7 @@ import type {
   PdfExtractionError,
   PdfExtractionResult,
 } from "../types";
+import { getAuthHeaders, notifyUnauthorized } from "./authApi";
 
 const DEFAULT_BASE_URL = "http://localhost:8000";
 
@@ -77,8 +78,13 @@ export async function extractPdfText(file: File): Promise<PdfExtractionResult> {
 
   const response = await fetch(`${getApiBaseUrl()}/api/documents/extract-text`, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: formData,
   });
+
+  if (response.status === 401) {
+    notifyUnauthorized();
+  }
 
   if (response.ok) {
     return (await response.json()) as PdfExtractionResult;
@@ -104,8 +110,13 @@ export async function extractTextWithOcr(file: File): Promise<OcrExtractionResul
 
   const response = await fetch(`${getApiBaseUrl()}/api/documents/extract-text-ocr`, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: formData,
   });
+
+  if (response.status === 401) {
+    notifyUnauthorized();
+  }
 
   if (response.ok) {
     return (await response.json()) as OcrExtractionResult;
@@ -130,15 +141,19 @@ export async function analyzeDocumentWithAi(
 ): Promise<MedicalDocumentExtraction> {
   const response = await fetch(`${getApiBaseUrl()}/api/documents/analyze-ai`, {
     method: "POST",
-    headers: {
+    headers: getAuthHeaders({
       "Content-Type": "application/json",
-    },
+    }),
     body: JSON.stringify({
       text,
       pages,
       document_type_hint: documentTypeHint,
     }),
   });
+
+  if (response.status === 401) {
+    notifyUnauthorized();
+  }
 
   if (response.ok) {
     return (await response.json()) as MedicalDocumentExtraction;

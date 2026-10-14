@@ -1,4 +1,7 @@
+import { HeartPulse } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { LoginPage } from "./components/auth/LoginPage";
+import { RegisterPage } from "./components/auth/RegisterPage";
 import {
   LabsPage,
   PrescriptionsPage,
@@ -13,6 +16,7 @@ import {
   type SelectedUpload,
 } from "./components/dashboard/UploadRecordDialog";
 import { AppShell } from "./components/layout/AppShell";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 import { medicalRecords } from "./data/demoData";
 import { useBoolean } from "./hooks/useBoolean";
 import {
@@ -44,7 +48,28 @@ function toMedicalRecord(doc: SavedMedicalDocument): MedicalRecord {
   };
 }
 
-export default function App() {
+function SessionLoadingScreen() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4 text-center">
+      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-accent text-primary shadow-sm ring-1 ring-border">
+        <HeartPulse className="h-8 w-8 animate-pulse text-primary" />
+      </div>
+      <h1 className="mt-4 font-display text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
+        Personal Health Copilot
+      </h1>
+      <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
+        Verifying secure clinical credentials...
+      </p>
+      <div className="mt-6 h-1.5 w-48 overflow-hidden rounded-full bg-muted">
+        <div className="h-full w-24 animate-pulse rounded-full bg-primary" />
+      </div>
+    </div>
+  );
+}
+
+function HealthAppContent() {
+  const { isAuthenticated, isLoading } = useAuth();
+  const [authView, setAuthView] = useState<"login" | "register">("login");
   const [section, setSection] = useState<NavSection>("overview");
   const [searchQuery, setSearchQuery] = useState("");
   const [records, setRecords] = useState<MedicalRecord[]>(medicalRecords);
@@ -52,16 +77,18 @@ export default function App() {
   const mobileNav = useBoolean(false);
   const uploadDialog = useBoolean(false);
 
-  // Load patient profile and persisted documents on initial mount
+  // Load patient profile and persisted documents for authenticated user
   const loadDatabaseRecords = useCallback(async () => {
     try {
-      // 1. Fetch patients
+      // 1. Fetch patients owned by current user
       const patients = await fetchPatients();
       if (patients && patients.length > 0) {
         setCurrentPatient(patients[0]);
+      } else {
+        setCurrentPatient(null);
       }
 
-      // 2. Fetch saved documents
+      // 2. Fetch saved documents owned by current user
       const docs = await fetchSavedDocuments();
       if (docs) {
         const dbRecords = docs.map(toMedicalRecord);
@@ -78,8 +105,14 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    loadDatabaseRecords();
-  }, [loadDatabaseRecords]);
+    if (isAuthenticated) {
+      void loadDatabaseRecords();
+    } else {
+      // Reset state on unauthenticated / logout
+      setRecords(medicalRecords);
+      setCurrentPatient(null);
+    }
+  }, [isAuthenticated, loadDatabaseRecords]);
 
   const filteredRecords = filterRecords(records, searchQuery);
 
@@ -133,6 +166,17 @@ export default function App() {
         return r;
       }),
     );
+  }
+
+  if (isLoading) {
+    return <SessionLoadingScreen />;
+  }
+
+  if (!isAuthenticated) {
+    if (authView === "register") {
+      return <RegisterPage onSwitchToLogin={() => setAuthView("login")} />;
+    }
+    return <LoginPage onSwitchToRegister={() => setAuthView("register")} />;
   }
 
   return (
@@ -194,3 +238,10 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <AuthProvider>
+      <HealthAppContent />
+    </AuthProvider>
+  );
+}

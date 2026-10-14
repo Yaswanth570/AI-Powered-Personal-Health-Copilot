@@ -18,6 +18,7 @@ from app.db.models import (
     MedicalDocument,
     MedicationRecord,
     Patient,
+    User,
 )
 from app.db.session import normalize_database_url
 

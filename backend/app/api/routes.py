@@ -14,10 +14,12 @@ from __future__ import annotations
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, UploadFile, status
 from fastapi.responses import JSONResponse
 
+from .auth_routes import get_current_user
 from ..config import get_settings
+from ..db.models import User
 from ..schemas import (
     AnalyzeDocumentError,
     AnalyzeDocumentRequest,
@@ -108,7 +110,10 @@ def _detect_file_kind(file_bytes: bytes, filename: str | None) -> Literal["pdf",
         "performed; image-only PDFs will report no selectable text."
     ),
 )
-async def extract_pdf_text(file: UploadFile = File(...)) -> PdfTextExtractionResponse:
+async def extract_pdf_text(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+) -> PdfTextExtractionResponse:
     settings = get_settings()
 
     # Validate the file name and content type before reading the body.
@@ -218,6 +223,7 @@ def _status_for_error(code: str) -> int:
 )
 async def extract_text_with_ocr(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
 ) -> OcrTextExtractionResponse | JSONResponse:
     settings = get_settings()
 
@@ -430,6 +436,7 @@ async def extract_text_with_ocr(
 )
 async def analyze_document_with_ai(
     payload: AnalyzeDocumentRequest,
+    current_user: User = Depends(get_current_user),
 ) -> MedicalDocumentExtraction | JSONResponse:
     try:
         extraction = extract_medical_document(

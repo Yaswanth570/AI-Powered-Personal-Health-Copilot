@@ -25,6 +25,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.auth_routes import get_current_user
 from app.config import Settings
 from app.db.base import Base
 from app.db.models import (
@@ -35,6 +36,7 @@ from app.db.models import (
     MedicalDocument,
     MedicationRecord,
     Patient,
+    User,
 )
 from app.db.session import get_db
 from app.main import app
@@ -53,6 +55,8 @@ test_engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+
+_TEST_USER_ID = "chat-test-user-id"
 
 
 @pytest.fixture(autouse=True)
@@ -74,12 +78,29 @@ def db_session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture
-def client(db_session: Session) -> Generator[TestClient, None, None]:
-    """Yield a FastAPI TestClient with database dependency overridden."""
+def test_user(db_session: Session) -> User:
+    """Seed test user for chat ownership tests."""
+    user = User(
+        id=_TEST_USER_ID,
+        email="chat@test.local",
+        hashed_password="pw",
+        full_name="Chat Tester",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def client(db_session: Session, test_user: User) -> Generator[TestClient, None, None]:
+    """Yield a FastAPI TestClient with database and auth dependencies overridden."""
     def override_get_db() -> Generator[Session, None, None]:
         yield db_session
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = lambda: test_user
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
@@ -93,11 +114,16 @@ def _mock_settings(gemini_key: str = "test-fake-key-step9") -> Settings:
     )
 
 
-def _seed_patient_with_records(db: Session, name: str = "Smt. Kamala Devi") -> tuple[Patient, MedicalDocument]:
+def _seed_patient_with_records(
+    db: Session,
+    name: str = "Smt. Kamala Devi",
+    user_id: str | None = None,
+) -> tuple[Patient, MedicalDocument]:
     """Create a patient with a prescription document and lab results."""
     now = datetime.now(timezone.utc)
     patient = Patient(
         id=str(uuid.uuid4()),
+        user_id=user_id or _TEST_USER_ID,
         display_name=name,
         age="58",
         gender="Female",
@@ -354,6 +380,7 @@ def test_empty_medical_history_handling(client: TestClient, db_session: Session)
     now = datetime.now(timezone.utc)
     patient_new = Patient(
         id=str(uuid.uuid4()),
+        user_id=_TEST_USER_ID,
         display_name="Sri. Raghava Rao",
         age="62",
         gender="Male",

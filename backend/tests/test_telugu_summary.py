@@ -22,6 +22,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.auth_routes import get_current_user
 from app.config import Settings
 from app.db.base import Base
 from app.db.models import (
@@ -30,6 +31,7 @@ from app.db.models import (
     MedicalDocument,
     MedicationRecord,
     Patient,
+    User,
 )
 from app.db.session import get_db
 from app.main import app
@@ -40,6 +42,22 @@ from app.schemas import (
     MedicationItem,
     TeluguHealthSummary,
 )
+
+_TEST_USER = User(
+    id="telugu-test-user-id",
+    email="telugu@test.local",
+    hashed_password="pw",
+    full_name="Telugu Tester",
+    is_active=True,
+)
+
+
+@pytest.fixture(autouse=True)
+def override_auth():
+    app.dependency_overrides[get_current_user] = lambda: _TEST_USER
+    yield
+    app.dependency_overrides.pop(get_current_user, None)
+
 
 FICTIONAL_EXTRACTION = MedicalDocumentExtraction(
     document_type="Prescription",
@@ -337,7 +355,22 @@ def test_explain_persisted_document_telugu_success() -> None:
 
     # Seed patient, document, and clinical records
     with TestingSessionLocal() as db:
-        patient = Patient(display_name="Smt. Kamala Devi", age="58", gender="Female")
+        user = User(
+            id=_TEST_USER.id,
+            email=_TEST_USER.email,
+            hashed_password=_TEST_USER.hashed_password,
+            full_name=_TEST_USER.full_name,
+            is_active=True,
+        )
+        db.add(user)
+        db.flush()
+
+        patient = Patient(
+            display_name="Smt. Kamala Devi",
+            age="58",
+            gender="Female",
+            user_id=_TEST_USER.id,
+        )
         db.add(patient)
         db.flush()
 

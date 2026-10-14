@@ -16,12 +16,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .auth_routes import get_current_user
 from ..db.models import (
     DiagnosisRecord,
     LabResultRecord,
     MedicalDocument,
     MedicationRecord,
     Patient,
+    User,
 )
 from ..db.session import get_db
 from ..schemas import (
@@ -100,6 +102,48 @@ def _to_doc_detail(doc: MedicalDocument) -> SavedDocumentDetail:
     )
 
 
+def _verify_user_patient(db: Session, patient_id: str, current_user: User) -> Patient:
+    """Verify that patient exists and is owned by the current authenticated user.
+
+    Raises:
+        HTTPException(404): If patient does not exist.
+        HTTPException(403): If patient exists but belongs to another user.
+    """
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Patient '{patient_id}' not found (does not exist).",
+        )
+    if patient.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: patient profile does not belong to you.",
+        )
+    return patient
+
+
+def _verify_user_document(db: Session, document_id: str, current_user: User) -> MedicalDocument:
+    """Verify that medical document exists and belongs to a patient owned by the current user.
+
+    Raises:
+        HTTPException(404): If document does not exist.
+        HTTPException(403): If document belongs to another user's patient.
+    """
+    doc = db.query(MedicalDocument).filter(MedicalDocument.id == document_id).first()
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Medical document '{document_id}' not found.",
+        )
+    if doc.patient and doc.patient.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: medical document does not belong to you.",
+        )
+    return doc
+
+
 # ============================================================================
 # Patients Endpoints
 # ============================================================================
@@ -113,12 +157,14 @@ def _to_doc_detail(doc: MedicalDocument) -> SavedDocumentDetail:
 )
 def create_patient(
     payload: PatientCreate,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PatientResponse:
-    """Create a new patient record."""
+    """Create a new patient record linked to the authenticated user."""
     try:
         patient = Patient(
             id=str(uuid.uuid4()),
+            user_id=current_user.id,
             display_name=payload.display_name.strip(),
             age=payload.age.strip() if payload.age else None,
             gender=payload.gender.strip() if payload.gender else None,
@@ -150,14 +196,16 @@ def create_patient(
     summary="List all patient profiles",
 )
 def list_patients(
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PatientListResponse:
-    """Retrieve all patient profiles with their document counts."""
+    """Retrieve all patient profiles belonging to the authenticated user with their document counts."""
     try:
-        # Query patients and left join documents count
+        # Query patients belonging strictly to current_user
         query = (
             select(Patient, func.count(MedicalDocument.id).label("doc_count"))
             .outerjoin(MedicalDocument, Patient.id == MedicalDocument.patient_id)
+            .where(Patient.user_id == current_user.id)
             .group_by(Patient.id)
             .order_by(Patient.display_name)
         )
@@ -193,15 +241,11 @@ def list_patients(
 )
 def get_patient(
     patient_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PatientResponse:
     """Retrieve a single patient profile."""
-    patient = db.query(Patient).filter(Patient.id == patient_id).first()
-    if not patient:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Patient '{patient_id}' not found.",
-        )
+    patient = _verify_user_patient(db, patient_id, current_user)
     doc_count = db.query(func.count(MedicalDocument.id)).filter(MedicalDocument.patient_id == patient.id).scalar() or 0
     return PatientResponse(
         id=patient.id,
@@ -221,19 +265,15 @@ def get_patient(
 )
 def list_patient_documents(
     patient_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SavedDocumentListResponse:
     """Retrieve all saved documents and counts for a given patient."""
-    patient = db.query(Patient).filter(Patient.id == patient_id).first()
-    if not patient:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Patient '{patient_id}' not found.",
-        )
+    patient = _verify_user_patient(db, patient_id, current_user)
 
     docs = (
         db.query(MedicalDocument)
-        .filter(MedicalDocument.patient_id == patient_id)
+        .filter(MedicalDocument.patient_id == patient.id)
         .order_by(MedicalDocument.created_at.desc())
         .all()
     )
@@ -255,6 +295,7 @@ def list_patient_documents(
 )
 def save_document(
     payload: SaveDocumentRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SavedDocumentDetail:
     """Persist a medical document and its normalized clinical findings atomically.
@@ -265,13 +306,8 @@ def save_document(
     - Never silently overwrites existing records.
     - Normalizes diagnoses, medications, and lab results into relational tables.
     """
-    # 1. Validate patient existence
-    patient = db.query(Patient).filter(Patient.id == payload.patient_id).first()
-    if not patient:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Patient with ID '{payload.patient_id}' does not exist.",
-        )
+    # 1. Validate patient existence and ownership
+    patient = _verify_user_patient(db, payload.patient_id, current_user)
 
     # 2. Prepare document record
     doc_id = str(uuid.uuid4())
@@ -401,12 +437,19 @@ def save_document(
 )
 def list_all_documents(
     patient_id: str | None = Query(None, description="Optional patient UUID filter"),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SavedDocumentListResponse:
-    """List persisted documents ordered by creation date."""
-    query = db.query(MedicalDocument)
+    """List persisted documents ordered by creation date for current user."""
     if patient_id:
-        query = query.filter(MedicalDocument.patient_id == patient_id)
+        _verify_user_patient(db, patient_id, current_user)
+        query = db.query(MedicalDocument).filter(MedicalDocument.patient_id == patient_id)
+    else:
+        query = (
+            db.query(MedicalDocument)
+            .join(Patient, MedicalDocument.patient_id == Patient.id)
+            .filter(Patient.user_id == current_user.id)
+        )
     docs = query.order_by(MedicalDocument.created_at.desc()).all()
     summaries = [_to_doc_summary(doc) for doc in docs]
     return SavedDocumentListResponse(documents=summaries, total=len(summaries))
@@ -419,15 +462,11 @@ def list_all_documents(
 )
 def get_document(
     document_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SavedDocumentDetail:
     """Retrieve full detail of a saved document."""
-    doc = db.query(MedicalDocument).filter(MedicalDocument.id == document_id).first()
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Medical document '{document_id}' not found.",
-        )
+    doc = _verify_user_document(db, document_id, current_user)
     return _to_doc_detail(doc)
 
 
@@ -439,15 +478,11 @@ def get_document(
 def update_document(
     document_id: str,
     payload: UpdateDocumentRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SavedDocumentDetail:
     """Update metadata for an existing medical document."""
-    doc = db.query(MedicalDocument).filter(MedicalDocument.id == document_id).first()
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Medical document '{document_id}' not found.",
-        )
+    doc = _verify_user_document(db, document_id, current_user)
 
     try:
         if payload.filename is not None:
@@ -477,15 +512,11 @@ def update_document(
 )
 def delete_document(
     document_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, str]:
     """Delete a medical document and all linked diagnoses, medications, and lab results."""
-    doc = db.query(MedicalDocument).filter(MedicalDocument.id == document_id).first()
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Medical document '{document_id}' not found.",
-        )
+    doc = _verify_user_document(db, document_id, current_user)
 
     try:
         db.delete(doc)
@@ -516,15 +547,11 @@ def delete_document(
 )
 def get_patient_fhir(
     patient_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Export all persisted medical records for a patient as a valid FHIR R4 collection Bundle."""
-    patient = db.query(Patient).filter(Patient.id == patient_id).first()
-    if not patient:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Patient '{patient_id}' not found.",
-        )
+    patient = _verify_user_patient(db, patient_id, current_user)
     return export_patient_fhir_bundle(patient)
 
 
@@ -534,15 +561,11 @@ def get_patient_fhir(
 )
 def get_document_fhir(
     document_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Export a single document and its linked diagnoses, medications, and labs as a FHIR R4 Bundle."""
-    doc = db.query(MedicalDocument).filter(MedicalDocument.id == document_id).first()
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Medical document '{document_id}' not found.",
-        )
+    doc = _verify_user_document(db, document_id, current_user)
     return export_document_fhir_bundle(doc)
 
 
@@ -558,6 +581,7 @@ def get_document_fhir(
 )
 def explain_extraction_telugu(
     payload: TeluguExplainRequest,
+    current_user: User = Depends(get_current_user),
 ) -> TeluguHealthSummary:
     """Generate patient-friendly Telugu explanations for clinical diagnoses, medicines, and labs.
 
@@ -602,15 +626,11 @@ def explain_extraction_telugu(
 )
 def explain_saved_document_telugu(
     document_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> TeluguHealthSummary:
     """Fetch a saved document from PostgreSQL and generate its patient-friendly Telugu explanation."""
-    doc = db.query(MedicalDocument).filter(MedicalDocument.id == document_id).first()
-    if not doc:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Medical document '{document_id}' not found.",
-        )
+    doc = _verify_user_document(db, document_id, current_user)
 
     # Reconstruct extraction from JSON snapshot or relational records
     if doc.ai_extraction_json:

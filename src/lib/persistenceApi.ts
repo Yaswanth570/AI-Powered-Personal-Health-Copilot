@@ -16,6 +16,7 @@ import type {
   SavedMedicalDocument,
   TeluguHealthSummary,
 } from "../types";
+import { getAuthHeaders, notifyUnauthorized } from "./authApi";
 import { getApiBaseUrl } from "./pdfApi";
 
 export class PersistenceApiError extends Error {
@@ -31,6 +32,10 @@ export class PersistenceApiError extends Error {
 }
 
 async function handleResponse<T>(res: Response, defaultMessage: string): Promise<T> {
+  if (res.status === 401) {
+    notifyUnauthorized();
+  }
+
   if (res.ok) {
     return (await res.json()) as T;
   }
@@ -56,7 +61,10 @@ async function handleResponse<T>(res: Response, defaultMessage: string): Promise
 /** Fetch all patient profiles from the database. */
 export async function fetchPatients(): Promise<PatientRecord[]> {
   const url = `${getApiBaseUrl()}/api/patients`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
   const data = await handleResponse<{ patients: PatientRecord[]; total: number }>(
     res,
     "Failed to load patient profiles",
@@ -73,7 +81,7 @@ export async function createPatient(
   const url = `${getApiBaseUrl()}/api/patients`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       display_name: displayName,
       age: age || null,
@@ -89,7 +97,10 @@ export async function fetchSavedDocuments(
 ): Promise<SavedMedicalDocument[]> {
   const params = patientId ? `?patient_id=${encodeURIComponent(patientId)}` : "";
   const url = `${getApiBaseUrl()}/api/documents${params}`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
   const data = await handleResponse<{
     documents: SavedMedicalDocument[];
     total: number;
@@ -102,7 +113,10 @@ export async function fetchDocumentDetail(
   documentId: string,
 ): Promise<SavedMedicalDocument> {
   const url = `${getApiBaseUrl()}/api/documents/${encodeURIComponent(documentId)}`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
   return handleResponse<SavedMedicalDocument>(
     res,
     `Failed to load document details for '${documentId}'`,
@@ -116,7 +130,7 @@ export async function saveDocumentToDatabase(
   const url = `${getApiBaseUrl()}/api/documents/save`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(payload),
   });
   return handleResponse<SavedMedicalDocument>(
@@ -133,7 +147,7 @@ export async function updateDocumentMetadata(
   const url = `${getApiBaseUrl()}/api/documents/${encodeURIComponent(documentId)}`;
   const res = await fetch(url, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(updates),
   });
   return handleResponse<SavedMedicalDocument>(
@@ -145,7 +159,10 @@ export async function updateDocumentMetadata(
 /** Delete a saved document and its linked diagnoses, medications, and lab results. */
 export async function deleteSavedDocument(documentId: string): Promise<void> {
   const url = `${getApiBaseUrl()}/api/documents/${encodeURIComponent(documentId)}`;
-  const res = await fetch(url, { method: "DELETE" });
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
   await handleResponse<{ status: string; id: string }>(
     res,
     "Failed to delete document from database",
@@ -159,7 +176,7 @@ export async function explainExtractionInTelugu(
   const url = `${getApiBaseUrl()}/api/documents/explain-telugu`;
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ extraction }),
   });
   return handleResponse<TeluguHealthSummary>(
@@ -173,7 +190,10 @@ export async function fetchDocumentTeluguExplanation(
   documentId: string,
 ): Promise<TeluguHealthSummary> {
   const url = `${getApiBaseUrl()}/api/documents/${encodeURIComponent(documentId)}/explain-telugu`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
   return handleResponse<TeluguHealthSummary>(
     res,
     `Failed to generate Telugu explanation for document '${documentId}'`,
@@ -185,7 +205,10 @@ export async function exportPatientFhirBundle(
   patientId: string,
 ): Promise<FhirBundle> {
   const url = `${getApiBaseUrl()}/api/patients/${encodeURIComponent(patientId)}/fhir`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
   return handleResponse<FhirBundle>(
     res,
     `Failed to export FHIR bundle for patient '${patientId}'`,
@@ -197,7 +220,10 @@ export async function exportDocumentFhirBundle(
   documentId: string,
 ): Promise<FhirBundle> {
   const url = `${getApiBaseUrl()}/api/documents/${encodeURIComponent(documentId)}/fhir`;
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, {
+    method: "GET",
+    headers: getAuthHeaders(),
+  });
   return handleResponse<FhirBundle>(
     res,
     `Failed to export FHIR bundle for document '${documentId}'`,

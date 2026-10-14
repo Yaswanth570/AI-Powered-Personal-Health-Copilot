@@ -47,6 +47,11 @@ class Settings:
     # CORS configuration
     cors_origin_regex: str | None = None
 
+    # JWT Authentication configuration
+    jwt_secret_key: str = "health-copilot-dev-secret-key-change-in-production-2026"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24
+
 
 def _parse_origins(raw: str) -> tuple[str, ...]:
     return tuple(origin.strip() for origin in raw.split(",") if origin.strip())
@@ -121,10 +126,34 @@ def get_settings() -> Settings:
     raw_db_url = os.getenv("DATABASE_URL")
     database_url = raw_db_url.strip() if raw_db_url and raw_db_url.strip() else None
 
+    raw_jwt_secret = os.getenv("JWT_SECRET_KEY")
+    jwt_secret_key = (
+        raw_jwt_secret.strip()
+        if raw_jwt_secret and raw_jwt_secret.strip()
+        else Settings.jwt_secret_key
+    )
+
+    raw_jwt_algo = os.getenv("JWT_ALGORITHM")
+    jwt_algorithm = (
+        raw_jwt_algo.strip()
+        if raw_jwt_algo and raw_jwt_algo.strip()
+        else Settings.jwt_algorithm
+    )
+
+    raw_expire = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES")
+    access_token_expire_minutes = (
+        int(raw_expire)
+        if raw_expire and raw_expire.isdigit()
+        else Settings.access_token_expire_minutes
+    )
+
     return Settings(
         max_upload_bytes=max_bytes,
         allowed_origins=origins,
         cors_origin_regex=cors_origin_regex,
+        jwt_secret_key=jwt_secret_key,
+        jwt_algorithm=jwt_algorithm,
+        access_token_expire_minutes=access_token_expire_minutes,
         ocr_max_pages=ocr_max_pages,
         ocr_dpi=ocr_dpi,
         ocr_languages=ocr_languages,

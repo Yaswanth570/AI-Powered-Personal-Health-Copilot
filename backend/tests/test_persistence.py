@@ -22,6 +22,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.auth_routes import get_current_user
 from app.db.base import Base
 from app.db.models import (
     DiagnosisRecord,
@@ -29,6 +30,7 @@ from app.db.models import (
     MedicalDocument,
     MedicationRecord,
     Patient,
+    User,
 )
 from app.db.session import get_db
 from app.main import app
@@ -42,6 +44,8 @@ test_engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+
+_TEST_USER_ID = "persistence-test-user-id"
 
 
 @pytest.fixture(autouse=True)
@@ -63,8 +67,24 @@ def db_session() -> Generator[Session, None, None]:
 
 
 @pytest.fixture
-def client(db_session: Session) -> Generator[TestClient, None, None]:
-    """FastAPI TestClient with overridden get_db dependency."""
+def test_user(db_session: Session) -> User:
+    """Seed test user for ownership association in persistence tests."""
+    user = User(
+        id=_TEST_USER_ID,
+        email="persist@test.local",
+        hashed_password="pw",
+        full_name="Persist Tester",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture
+def client(db_session: Session, test_user: User) -> Generator[TestClient, None, None]:
+    """FastAPI TestClient with overridden get_db and get_current_user dependencies."""
 
     def _override_get_db() -> Generator[Session, None, None]:
         session = TestingSessionLocal()
@@ -74,6 +94,7 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
             session.close()
 
     app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_current_user] = lambda: test_user
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

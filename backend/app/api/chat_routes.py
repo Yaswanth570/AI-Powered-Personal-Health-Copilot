@@ -19,8 +19,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from .auth_routes import get_current_user
 from ..config import Settings, get_settings
-from ..db.models import ChatConversation, ChatMessage, Patient
+from ..db.models import ChatConversation, ChatMessage, Patient, User
 from ..db.session import get_db
 from ..schemas import (
     ChatCitationItem,
@@ -48,10 +49,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/patients/{patient_id}", tags=["health-ai-chat"])
 
 
-def _verify_patient(db: Session, patient_id: str) -> Patient:
-    """Verify that the patient exists in the database.
+def _verify_patient(db: Session, patient_id: str, current_user: User) -> Patient:
+    """Verify that the patient exists in the database and belongs to the authenticated user.
 
-    Enforces patient existence before performing conversation operations.
+    Enforces patient ownership before performing conversation operations.
     """
     patient = db.scalar(select(Patient).where(Patient.id == patient_id))
     if not patient:
@@ -59,23 +60,34 @@ def _verify_patient(db: Session, patient_id: str) -> Patient:
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Patient '{patient_id}' not found.",
         )
+    if patient.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: patient profile does not belong to you.",
+        )
     return patient
 
 
 def _verify_conversation(
-    db: Session, patient_id: str, conversation_id: str
+    db: Session, patient_id: str, conversation_id: str, current_user: User
 ) -> ChatConversation:
-    """Verify that the conversation exists and strictly belongs to the specified patient.
+    """Verify that the conversation exists and strictly belongs to the specified patient and user.
 
     Prevents cross-patient unauthorized data access and conversation leakage.
     """
+    _verify_patient(db, patient_id, current_user)
+
     conv = db.scalar(
         select(ChatConversation).where(
             ChatConversation.id == conversation_id,
-            ChatConversation.patient_id == patient_id,
         )
     )
     if not conv:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation '{conversation_id}' not found.",
+        )
+    if conv.patient_id != patient_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Conversation '{conversation_id}' not found for patient '{patient_id}'.",
@@ -109,10 +121,11 @@ def _parse_citations(raw: Any) -> list[ChatCitationItem] | None:
 @router.get("/conversations", response_model=list[ChatConversationSummary])
 def list_conversations(
     patient_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[ChatConversationSummary]:
     """List all chat conversations for the active patient, ordered by last activity."""
-    _verify_patient(db, patient_id)
+    _verify_patient(db, patient_id, current_user)
 
     conversations = db.scalars(
         select(ChatConversation)
@@ -162,10 +175,11 @@ def list_conversations(
 def create_conversation(
     patient_id: str,
     payload: ChatConversationCreate | None = None,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ChatConversationDetail:
     """Create a new conversational consultation session for the patient."""
-    _verify_patient(db, patient_id)
+    _verify_patient(db, patient_id, current_user)
 
     title = (payload.title.strip() if payload and payload.title and payload.title.strip() else None) or "Health Consultation"
 
@@ -195,11 +209,12 @@ def create_conversation(
 def get_conversation(
     patient_id: str,
     conversation_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ChatConversationDetail:
     """Retrieve an existing conversation along with its chronological message history."""
-    _verify_patient(db, patient_id)
-    conv = _verify_conversation(db, patient_id, conversation_id)
+    _verify_patient(db, patient_id, current_user)
+    conv = _verify_conversation(db, patient_id, conversation_id, current_user)
 
     messages = db.scalars(
         select(ChatMessage)
@@ -234,11 +249,12 @@ def get_conversation(
 def delete_conversation(
     patient_id: str,
     conversation_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Delete a conversation and all of its associated messages."""
-    _verify_patient(db, patient_id)
-    conv = _verify_conversation(db, patient_id, conversation_id)
+    _verify_patient(db, patient_id, current_user)
+    conv = _verify_conversation(db, patient_id, conversation_id, current_user)
     db.delete(conv)
     db.commit()
     return {"deleted": True, "conversation_id": conversation_id}
@@ -250,9 +266,10 @@ def _execute_chat_message(
     conversation_id: str,
     user_query: str,
     settings: Settings,
+    current_user: User,
 ) -> ChatSendMessageResponse:
     """Execute sending a chat message, calling Gemini, saving messages, and returning response."""
-    conv = _verify_conversation(db, patient_id, conversation_id)
+    conv = _verify_conversation(db, patient_id, conversation_id, current_user)
 
     now = datetime.now(timezone.utc)
 
@@ -436,11 +453,12 @@ def send_conversation_message(
     patient_id: str,
     conversation_id: str,
     payload: ChatSendMessageRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ChatSendMessageResponse:
     """Send a user message in an existing conversation and receive an evidence-grounded AI reply."""
-    _verify_patient(db, patient_id)
+    _verify_patient(db, patient_id, current_user)
     user_query = payload.message.strip()
     if not user_query:
         raise HTTPException(
@@ -454,6 +472,7 @@ def send_conversation_message(
         conversation_id=conversation_id,
         user_query=user_query,
         settings=settings,
+        current_user=current_user,
     )
 
 
@@ -461,11 +480,12 @@ def send_conversation_message(
 def quick_chat(
     patient_id: str,
     payload: ChatSendMessageRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> ChatSendMessageResponse:
     """Convenience endpoint: send a message, auto-creating a conversation if none specified."""
-    _verify_patient(db, patient_id)
+    _verify_patient(db, patient_id, current_user)
 
     user_query = payload.message.strip()
     if not user_query:
@@ -499,4 +519,5 @@ def quick_chat(
         conversation_id=conversation_id,
         user_query=user_query,
         settings=settings,
+        current_user=current_user,
     )

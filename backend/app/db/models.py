@@ -36,6 +36,42 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
+class User(Base):
+    """Authenticated user account for SaaS access and data ownership."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=_new_id
+    )
+    email: Mapped[str] = mapped_column(
+        String(255), unique=True, index=True, nullable=False
+    )
+    hashed_password: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    full_name: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
+    )
+
+    # Relationships
+    patients: Mapped[list[Patient]] = relationship(
+        "Patient",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        order_by="asc(Patient.created_at)",
+    )
+
+
 class Patient(Base):
     """Patient profile record."""
 
@@ -43,6 +79,12 @@ class Patient(Base):
 
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=_new_id
+    )
+    user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     display_name: Mapped[str] = mapped_column(String(255), nullable=False)
     age: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -55,6 +97,7 @@ class Patient(Base):
     )
 
     # Relationships
+    user: Mapped[User | None] = relationship("User", back_populates="patients")
     documents: Mapped[list[MedicalDocument]] = relationship(
         "MedicalDocument",
         back_populates="patient",
