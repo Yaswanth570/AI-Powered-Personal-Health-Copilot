@@ -44,6 +44,9 @@ class Settings:
     # PostgreSQL Database configuration.
     database_url: str | None = None
 
+    # CORS configuration
+    cors_origin_regex: str | None = None
+
 
 def _parse_origins(raw: str) -> tuple[str, ...]:
     return tuple(origin.strip() for origin in raw.split(",") if origin.strip())
@@ -54,6 +57,7 @@ def get_settings() -> Settings:
 
     ``MAX_UPLOAD_BYTES`` overrides the 10 MB limit.
     ``CORS_ORIGINS`` is a comma-separated list of allowed origins.
+    ``CORS_ORIGIN_REGEX`` is a regex pattern matching allowed origins (e.g. Vercel preview deploys).
     ``GEMINI_API_KEY`` provides the Google Gen AI API key.
     ``GEMINI_MODEL`` overrides the Gemini model name (default: gemini-3.1-flash-lite).
     ``MAX_AI_TEXT_CHARS`` overrides the max characters for AI extraction.
@@ -64,7 +68,19 @@ def get_settings() -> Settings:
     max_bytes = int(raw_max) if raw_max and raw_max.isdigit() else Settings.max_upload_bytes
 
     raw_origins = os.getenv("CORS_ORIGINS")
-    origins = _parse_origins(raw_origins) if raw_origins else Settings.allowed_origins
+    if raw_origins:
+        parsed_custom = _parse_origins(raw_origins)
+        # Combine custom origins with local development origins for seamless testing
+        origins = tuple(dict.fromkeys(parsed_custom + Settings.allowed_origins))
+    else:
+        origins = Settings.allowed_origins
+
+    raw_origin_regex = os.getenv("CORS_ORIGIN_REGEX")
+    cors_origin_regex = (
+        raw_origin_regex.strip()
+        if raw_origin_regex and raw_origin_regex.strip()
+        else None
+    )
 
     raw_pages = os.getenv("OCR_MAX_PAGES")
     ocr_max_pages = (
@@ -108,6 +124,7 @@ def get_settings() -> Settings:
     return Settings(
         max_upload_bytes=max_bytes,
         allowed_origins=origins,
+        cors_origin_regex=cors_origin_regex,
         ocr_max_pages=ocr_max_pages,
         ocr_dpi=ocr_dpi,
         ocr_languages=ocr_languages,

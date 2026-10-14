@@ -22,7 +22,8 @@ const DEFAULT_BASE_URL = "http://localhost:8000";
 
 export function getApiBaseUrl(): string {
   const configured = import.meta.env.VITE_API_BASE_URL as string | undefined;
-  return configured?.trim() || DEFAULT_BASE_URL;
+  const url = configured?.trim() || DEFAULT_BASE_URL;
+  return url.replace(/\/+$/, "");
 }
 
 export class PdfExtractionApiError extends Error {

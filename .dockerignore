@@ -1,0 +1,55 @@
+# Secrets & Environment Variables (Never copy keys or private credentials)
+.env
+.env.*
+*.env
+*.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Local databases & persistent storage
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+backend/*.db
+backend/*.sqlite
+health_copilot.db
+backend/health_copilot.db
+
+# Python bytecode and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Testing and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+backend/tests/
+
+# Node.js & Frontend builds
+node_modules/
+dist/
+
+# Editor & Git artifacts
+.git/
+.gitignore
+.dockerignore
+.vscode/
+.idea/
+
+# Local sample medical files, uploads, and dumps
+uploads/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tiff
+*.bmp
