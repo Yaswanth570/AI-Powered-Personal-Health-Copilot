@@ -483,3 +483,4 @@ src/
 ## Hackathon note
 
 Do not treat this interface as a clinical tool. Sample reference ranges are illustrative only. Extracted text is raw document content and must be reviewed by a licensed clinician before any clinical decision.
+
